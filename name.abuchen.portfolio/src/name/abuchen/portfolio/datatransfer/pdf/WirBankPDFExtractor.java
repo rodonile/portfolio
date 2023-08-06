@@ -106,10 +106,29 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 .assign((t, v) -> t.setSecurity(getOrCreateSecurity(v)))
 
                 // 1.369 Ant iShares Core S&P500
-                .section("shares")
-                .find("Order: (Kauf|Verkauf|Buy|Sell)")
-                .match("^(?<shares>[\\.,\\d]+) (Ant|Qty) (?<name>.*)$")
-                .assign((t, v) -> t.setShares(asShares(v.get("shares"))))
+                        // HINT: this part is modified to compute the shares
+                        // amount based on transaction amount and share price
+                .section("shares", "fxCurrency", "fxGross", "shareCurrency", "sharePrice")
+                        .find("^(Order): (Kauf|Verkauf|Buy|Sell)")
+                        .match("^(?<shares>[\\.,\\d]+) (Ant|Qty) (?<name>.*)$")
+                        .match("^(Kurs|Price): (?<shareCurrency>[\\w]{3}) (?<sharePrice>[\\.,'\\d]+)$")
+                        .match("^(Betrag|Amount) (?<fxCurrency>[\\w]{3}) (?<fxGross>[\\.,'\\d]+)$")
+
+                .assign((t, v) -> {
+                    long shares_DBG = ExtractorUtils.convertToNumberLong(v.get("shares"), Values.Share, "de",
+                                    "CH");
+                    long amount = ExtractorUtils.convertToNumberLong(v.get("fxGross"), Values.Amount, "de",
+                                    "CH");
+                    long price = ExtractorUtils.convertToNumberLong(v.get("sharePrice"), Values.Amount, "de",
+                                    "CH");
+                    long shares_calculated = (long) ((double) amount * 1e8 / price);
+                    System.out.println("amount= " + amount);
+                    System.out.println("price= " + price);
+                    System.out.println("Shares calculated= " + shares_calculated);
+                    System.out.println("Shares read from pdf= " + shares_DBG);
+
+                    t.setShares(shares_calculated);
+                })
 
                 // Verrechneter Betrag: Valuta 05.07.2018 CHF 360.43
                 .section("date")
