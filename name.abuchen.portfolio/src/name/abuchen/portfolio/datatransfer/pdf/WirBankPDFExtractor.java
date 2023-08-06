@@ -25,7 +25,7 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
     {
         super(client);
 
-        addBankIdentifier("WIR Bank");
+        addBankIdentifier("WIR");
 
         addDepositTransaction();
         addBuySellTransaction();
@@ -42,10 +42,10 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
 
     private void addDepositTransaction()
     {
-        DocumentType type = new DocumentType("(Einzahlung|Deposit) 3a");
+        DocumentType type = new DocumentType("(Einzahlung|Deposit|Versamento) 3a");
         this.addDocumentTyp(type);
 
-        Block block = new Block("^(Einzahlung|Deposit) 3a$");
+        Block block = new Block("^(Einzahlung|Deposit|Versamento) 3a$");
         type.addBlock(block);
         block.set(new Transaction<AccountTransaction>().subject(() -> {
             AccountTransaction transaction = new AccountTransaction();
@@ -54,8 +54,8 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
         })
 
                 .section("date", "amount", "currency")
-                .find("(Einzahlung|Deposit) 3a")
-                .match("^(Gutschrift: Valuta|Credit: Value date) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
+                .find("(Einzahlung|Deposit|Versamento) 3a")
+                .match("^(Gutschrift: Valuta|Credit: Value date|Accredito: Valuta) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
                 .assign((t, v) -> {
                     t.setDateTime(asDate(v.get("date")));
                     t.setAmount(asAmount(v.get("amount")));
@@ -63,7 +63,7 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 })
 
                 .section("note").optional()
-                .match("^(Zahlungseingang von|Incoming payment from): (?<note>.*)$")
+                .match("^(Zahlungseingang von|Incoming payment from|Pagamento in entrata da): (?<note>.*)$")
                 .assign((t, v) -> t.setNote(trim(v.get("note"))))
 
                 .wrap(TransactionItem::new));
@@ -71,7 +71,7 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
 
     private void addBuySellTransaction()
     {
-        DocumentType type = new DocumentType("(B.rsenabrechnung|Exchange Settlement) \\- (Kauf|Verkauf|Buy|Sell)");
+        DocumentType type = new DocumentType("(B.rsenabrechnung|Exchange Settlement|Conteggio di borsa) \\p{Pd} (Kauf|Verkauf|Buy|Sell|acquisto|vendita)");
         this.addDocumentTyp(type);
 
         Transaction<BuySellEntry> pdfTransaction = new Transaction<>();
@@ -81,14 +81,14 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
             return entry;
         });
 
-        Block firstRelevantLine = new Block("^(B.rsenabrechnung|Exchange Settlement) \\- (Kauf|Verkauf|Buy|Sell).*$");
+        Block firstRelevantLine = new Block("^(B.rsenabrechnung|Exchange Settlement|Conteggio di borsa) \\p{Pd} (Kauf|Verkauf|Buy|Sell|acquisto|vendita).*$");
         type.addBlock(firstRelevantLine);
         firstRelevantLine.set(pdfTransaction);
 
         pdfTransaction
                 // Is type --> "Verkauf" change from BUY to SELL
                 .section("type").optional()
-                .match("^(B.rsenabrechnung|Exchange Settlement) \\- (?<type>(Kauf|Verkauf|Buy|Sell)).*$")
+                .match("^(B.rsenabrechnung|Exchange Settlement|Conteggio di borsa) \\p{Pd} (?<type>(Kauf|Verkauf|Buy|Sell|acquisto|vendita)).*$")
                 .assign((t, v) -> {
                     if ("Verkauf".equals(v.get("type")) || "Sell".equals(v.get("type")))
                         t.setType(PortfolioTransaction.Type.SELL);
@@ -99,20 +99,20 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 // ISIN: IE00B5BMR087
                 // Kurs: USD 262.51
                 .section("isin", "name", "currency")
-                .find("Order: (Kauf|Verkauf|Buy|Sell)")
-                .match("^[\\.,\\d]+ (Ant|Qty) (?<name>.*)$")
+                .find("^(Order|Ordine): (Kauf|Verkauf|Buy|Sell|acquisto|vendita)")
+                .match("^[\\.,\\d]+ (Ant|Qty|CSIF) (?<name>.*)$")
                 .match("^ISIN: (?<isin>[A-Z]{2}[A-Z0-9]{9}[0-9])$")
-                .match("^(Kurs|Price): (?<currency>[\\w]{3}) .*$")
+                .match("^(Kurs|Price|Corso): (?<currency>[\\w]{3}) .*$")
                 .assign((t, v) -> t.setSecurity(getOrCreateSecurity(v)))
 
                 // 1.369 Ant iShares Core S&P500
                         // HINT: this part is modified to compute the shares
                         // amount based on transaction amount and share price
                 .section("shares", "fxCurrency", "fxGross", "shareCurrency", "sharePrice")
-                        .find("^(Order): (Kauf|Verkauf|Buy|Sell)")
-                        .match("^(?<shares>[\\.,\\d]+) (Ant|Qty) (?<name>.*)$")
-                        .match("^(Kurs|Price): (?<shareCurrency>[\\w]{3}) (?<sharePrice>[\\.,'\\d]+)$")
-                        .match("^(Betrag|Amount) (?<fxCurrency>[\\w]{3}) (?<fxGross>[\\.,'\\d]+)$")
+                        .find("^(Order|Ordine): (Kauf|Verkauf|Buy|Sell|acquisto|vendita)")
+                        .match("^(?<shares>[\\.,\\d]+) (Ant|Qty|CSIF) (?<name>.*)$")
+                        .match("^(Kurs|Price|Corso): (?<shareCurrency>[\\w]{3}) (?<sharePrice>[\\.,'\\d]+)$")
+                        .match("^(Betrag|Amount|Importo) (?<fxCurrency>[\\w]{3}) (?<fxGross>[\\.,'\\d]+)$")
 
                 .assign((t, v) -> {
                     long shares_DBG = ExtractorUtils.convertToNumberLong(v.get("shares"), Values.Share, "de",
@@ -132,12 +132,12 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
 
                 // Verrechneter Betrag: Valuta 05.07.2018 CHF 360.43
                 .section("date")
-                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) .*$")
+                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date|Importo contabilizzato: Valuta) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) .*$")
                 .assign((t, v) -> t.setDate(asDate(v.get("date"))))
 
                 // Verrechneter Betrag: Valuta 05.07.2018 CHF 360.43
                 .section("amount", "currency")
-                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date) .* (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
+                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date|Importo contabilizzato: Valuta) .* (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
                 .assign((t, v) -> {
                     t.setAmount(asAmount(v.get("amount")));
                     t.setCurrencyCode(asCurrencyCode(v.get("currency")));
@@ -146,7 +146,7 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 // Betrag USD 359.27
                 // Umrechnungskurs CHF/USD 1.00195 CHF 359.98
                 .section("fxCurrency", "fxGross", "termCurrency", "baseCurrency", "exchangeRate", "currency", "gross").optional()
-                .match("^(Betrag|Amount) (?<fxCurrency>[\\w]{3}) (?<fxGross>[\\.,'\\d]+)$")
+                .match("^(Betrag|Amount|Importo) (?<fxCurrency>[\\w]{3}) (?<fxGross>[\\.,'\\d]+)$")
                 .match("^(Umrechnungskurs|Exchange rate) (?<termCurrency>[\\w]{3})\\/(?<baseCurrency>[\\w]{3}) (?<exchangeRate>[\\.,'\\d]+) (?<currency>[\\w]{3}) (?<gross>[\\.,'\\d]+)$")
                 .assign((t, v) -> {
                     ExtrExchangeRate rate = asExchangeRate(v);
@@ -167,10 +167,10 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
 
     private void addInterestTransaction()
     {
-        DocumentType type = new DocumentType("(Zins|Interest)");
+        DocumentType type = new DocumentType("(Zins|Interest|Interessi)");
         this.addDocumentTyp(type);
 
-        Block block = new Block("^(Zins|Interest)$");
+        Block block = new Block("^(Zins|Interest|Interessi)$");
         type.addBlock(block);
         block.set(new Transaction<AccountTransaction>().subject(() -> {
             AccountTransaction transaction = new AccountTransaction();
@@ -179,9 +179,9 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
         })
 
                 .section("date", "amount", "currency")
-                .find("(Zins|Interest)")
-                .match("^(Am|On) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (haben wir (Ihrem Konto|Ihnen) gutgeschrieben|we have credited your account):$")
-                .match("^(Zinsgutschrift|Interest credit): (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
+                .find("(Zins|Interest|Interessi)")
+                .match("^(Am|On) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (haben wir (Ihrem Konto|Ihnen) gutgeschrieben|we have credited your account|abbiamo accreditato il suo conto):$")
+                .match("^(Zinsgutschrift|Interest credit|Interessi accreditati): (?<currency>[\\w]{3}) (?<amount>[\\.,'\\d]+)$")
                 .assign((t, v) -> {
                     t.setDateTime(asDate(v.get("date")));
                     t.setAmount(asAmount(v.get("amount")));
@@ -189,8 +189,8 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 })
 
                 .section("note1", "note2").optional()
-                .match("^(?<note1>(Zinssatz|Interest rate): [\\.,\\d]+%)$")
-                .match("^(?<note2>(Zinsperiode|Interest period): .*)$")
+                .match("^(?<note1>(Zinssatz|Interest rate|Tasso d'interesse): [\\.,\\d]+%)$")
+                .match("^(?<note2>(Zinsperiode|Interest period|Periodo d'interesse): .*)$")
                 .assign((t, v) -> t.setNote(trim(v.get("note1")) + " | " + trim(v.get("note2"))))
 
                 .wrap(TransactionItem::new));
@@ -198,10 +198,10 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
 
     private void addFeeTransaction()
     {
-        DocumentType type = new DocumentType("(Belastung|Commission)");
+        DocumentType type = new DocumentType("(Belastung|Commission|Addebito)");
         this.addDocumentTyp(type);
 
-        Block block = new Block("^(Belastung|Commission)$");
+        Block block = new Block("^(Belastung|Commission|Addebito)$");
         type.addBlock(block);
         block.set(new Transaction<AccountTransaction>().subject(() -> {
             AccountTransaction transaction = new AccountTransaction();
@@ -210,8 +210,8 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
         })
 
                 .section("date", "amount", "currency")
-                .find("(Belastung|Commission)")
-                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (?<currency>[\\w]{3}) \\-(?<amount>[\\.,'\\d]+)$")
+                .find("(Belastung|Commission|Addebito)")
+                .match("^(Verrechneter Betrag: Valuta|Charged amount: Value date|Importo contabilizzato: Valuta) (?<date>[\\d]{2}\\.[\\d]{2}\\.[\\d]{4}) (?<currency>[\\w]{3}) \\-(?<amount>[\\.,'\\d]+)$")
                 .assign((t, v) -> {
                     t.setDateTime(asDate(v.get("date")));
                     t.setAmount(asAmount(v.get("amount")));
@@ -219,7 +219,7 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                 })
 
                 .section("note").optional()
-                .match("^(Effektive|Effective) (?<note>(VIAC Verwaltungsgeb.hr|VIAC administration fee): [\\.,\\d]+%) .*$")
+                .match("^(Effektive|Effective) (?<note>(VIAC Verwaltungsgeb.hr|VIAC administration fee|Tassa di gestione VIAC): [\\.,\\d]+%) .*$")
                 .assign((t, v) -> t.setNote(trim(v.get("note"))))
 
                 .wrap(TransactionItem::new));
