@@ -360,7 +360,13 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                         .match("^[\\.,\\d]+ (Anteile|Qty|Ant|parts|units|actions)?(?<name>.*)$") //
                         .match("^ISIN: (?<isin>[A-Z]{2}[A-Z0-9]{9}[0-9])$") //
                         .match("^(Aussch.ttung|Dividend payment|Dividende distribu.): (?<currency>[\\w]{3}) .*$") //
-                        .assign((t, v) -> t.setSecurity(getOrCreateSecurity(v)))
+                        .assign((t, v) -> {
+                            // Only set security if not a refund/withholding tax
+                            if (t.getType() != AccountTransaction.Type.TAX_REFUND) {
+                                t.setSecurity(getOrCreateSecurity(v));
+                            }
+                            // If it's a tax refund, do not bind to security (acts as deposit)
+                        })
 
                         // @formatter:off
                         // Dividendenart: Ordentliche Dividende
@@ -369,7 +375,12 @@ public class WirBankPDFExtractor extends AbstractPDFExtractor
                         .section("shares") //
                         .find("(Dividendenart|Type of dividend|Type de dividende):.*") //
                         .match("^(?<shares>[\\.,\\d]+) (Anteile|Qty|Ant|parts|units|actions)?.*$") //
-                        .assign((t, v) -> t.setShares(asShares(v.get("shares"))))
+                        .assign((t, v) -> {
+                            if (t.getType() != AccountTransaction.Type.TAX_REFUND) {
+                                t.setShares(asShares(v.get("shares")));
+                            }
+                            // For tax refund, do not set shares
+                        })
 
                         // @formatter:off
                         // Gutgeschriebener Betrag: Valuta 04.02.2022 CHF 31.44
